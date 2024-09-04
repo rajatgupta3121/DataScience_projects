@@ -1,0 +1,107 @@
+import streamlit as st
+import json
+import nltk
+import string
+import random
+import speech_recognition as sr
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from gtts import gTTS
+import os
+
+# Download necessary NLTK data
+nltk.download('punkt')
+nltk.download('wordnet')
+nltk.download('stopwords')
+
+# Load intents JSON file
+with open("C:/Users/ocn/OneDrive/Desktop/intents.json", "r") as file:
+    intents_data = json.load(file)
+
+intents = intents_data["intents"]
+
+# Lemmatization function
+lemmer = nltk.stem.WordNetLemmatizer()
+
+def LemTokens(tokens):
+    return [lemmer.lemmatize(token.lower()) for token in tokens if token not in nltk.corpus.stopwords.words('english')]
+
+remove_punc_dict = dict((ord(punct), None) for punct in string.punctuation)
+
+def LemNormalize(text):
+    return LemTokens(nltk.word_tokenize(text.lower().translate(remove_punc_dict)))
+
+# Prepare patterns and responses
+patterns_responses = {}
+
+for intent in intents:
+    for pattern in intent["patterns"]:
+        normalized_pattern = ' '.join(LemNormalize(pattern))
+        patterns_responses[normalized_pattern] = intent["responses"]
+
+# Vectorization using TfidfVectorizer with fine-tuning
+TfidfVec = TfidfVectorizer(tokenizer=LemNormalize, stop_words="english", ngram_range=(1, 2))
+tfidf_matrix = TfidfVec.fit_transform(patterns_responses.keys())
+
+# Generate response
+def get_response(user_response):
+    user_tfidf = TfidfVec.transform([user_response])
+    similarity_scores = cosine_similarity(user_tfidf, tfidf_matrix)
+    max_sim_index = similarity_scores.argmax()
+
+    # Improve response selection with a threshold
+    if similarity_scores[0][max_sim_index] > 0.3:  # Adjust threshold as needed
+        response = list(patterns_responses.values())[max_sim_index]
+        return random.choice(response)
+    else:
+        return "I'm sorry, I don't understand. Can you please rephrase?"
+
+# Convert speech to text
+def speech_to_text():
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        st.write("Listening...")
+        audio = r.listen(source)
+
+    try:
+        user_input = r.recognize_google(audio)
+        return user_input
+    except sr.UnknownValueError:
+        st.write("Sorry, I couldn't understand what you said.")
+    except sr.RequestError:
+        st.write("Sorry, my speech recognition service is unavailable at the moment.")
+
+# Convert text to speech
+def text_to_speech(text):
+    tts = gTTS(text=text, lang='en')
+    tts.save("output.mp3")
+    os.system("start output.mp3")
+
+# Main Streamlit app function
+def main():
+    st.title("Sia Chat Bot")
+    st.write("Namaste! I am Sia Chat Bot. You can ask me health-related queries.")
+    st.markdown(
+        '<style>img {display: block; margin-left: auto; margin-right: auto;}</style>',
+        unsafe_allow_html=True
+    )
+    st.image("C:/Users/ocn/OneDrive/Desktop/Mychatbot/bot.png", use_column_width=True)
+    text_to_speech("Namaste! I am Sia Chat Bot. You can ask me health-related queries.")
+
+    speech_input = st.button("Speak")
+    if speech_input:
+        user_input = speech_to_text()
+        if user_input:
+            st.text_input("You:", user_input)
+            bot_response = get_response(user_input.lower())
+            st.text_area("Bot:", value=bot_response, height=200, max_chars=None)
+            text_to_speech(bot_response)
+
+    user_input = st.text_input("You:", "")
+    if user_input:
+        bot_response = get_response(user_input.lower())
+        st.text_area("Bot:", value=bot_response, height=200, max_chars=None)
+        text_to_speech(bot_response)
+
+if __name__ == "__main__":
+    main()
